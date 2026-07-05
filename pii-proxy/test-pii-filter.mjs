@@ -33,7 +33,7 @@ function loadConfig() {
   } catch {
     return {
       enabled: true,
-      categories: ['EMAIL', 'PHONE', 'NAME', 'ORG', 'ADDRESS', 'API_KEY', 'CREDIT_CARD', 'MY_NUMBER', 'SCHOOL', 'SSN', 'IP_ADDRESS', 'POSTAL_CODE'],
+      categories: ['EMAIL', 'PHONE', 'NAME', 'ORG', 'ADDRESS', 'API_KEY', 'CREDIT_CARD', 'MY_NUMBER', 'SCHOOL', 'SSN', 'IP_ADDRESS', 'POSTAL_CODE', 'IBAN', 'BANK_ACCOUNT', 'DRIVER_LICENSE', 'PASSPORT', 'CRYPTO_WALLET', 'DATE_TIME', 'MEDICAL_RECORD', 'HEALTH_INSURANCE'],
       dictionary: [],
       allowlist: [],
       ollamaEnabled: false,
@@ -136,11 +136,27 @@ function luhnCheck(digits) {
   return sum % 10 === 0
 }
 
+function ibanCheck(input) {
+  const iban = input.replace(/\s/g, '').toUpperCase()
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban)) return false
+
+  const rearranged = `${iban.slice(4)}${iban.slice(0, 4)}`
+  let remainder = 0
+  for (const char of rearranged) {
+    const value = /[A-Z]/.test(char) ? String(char.charCodeAt(0) - 55) : char
+    for (const digit of value) {
+      remainder = (remainder * 10 + Number.parseInt(digit, 10)) % 97
+    }
+  }
+  return remainder === 1
+}
+
 const PATTERNS = [
   { category: 'API_KEY', pattern: /\b(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36,}|gho_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|AKIA[0-9A-Z]{16}|xox[bpras]-[A-Za-z0-9\-]{10,}|sk-ant-[A-Za-z0-9\-]{20,})\b/g },
   { category: 'EMAIL', pattern: /[\w.+-]+@[\w-]+\.[\w.-]+/g },
   { category: 'CREDIT_CARD', pattern: /\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g, validate: luhnCheck },
   { category: 'MY_NUMBER', pattern: /\b\d{4}[-\s]\d{4}[-\s]\d{4}\b/g },
+  { category: 'MY_NUMBER', pattern: /(?:マイナンバー|個人番号)[:：]?\s*(\d{12}|\d{4}[-\s]\d{4}[-\s]\d{4})\b/g, captureGroup: 1 },
   { category: 'PHONE', pattern: /(?:\+81[-\s]?|0)\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}\b/g, validate: (match) => match.replace(/[-\s]/g, '').length >= 10 },
   { category: 'PHONE', pattern: /\+\d{1,3}[-\s]\d{1,14}(?:[-\s]\d{1,14}){0,4}\b/g },
   { category: 'ADDRESS', pattern: /(?:北海道|東京都|(?:大阪|京都)府|.{2,3}県).{1,8}(?:市|区|町|村|郡).{1,20}?(?:\d{1,4}[-ー]\d{1,4}(?:[-ー]\d{1,4})?|[一二三四五六七八九十百]+丁目)/g },
@@ -151,6 +167,15 @@ const PATTERNS = [
   { category: 'IP_ADDRESS', pattern: /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/g },
   { category: 'POSTAL_CODE', pattern: /〒\d{3}-\d{4}/g },
   { category: 'POSTAL_CODE', pattern: /\b\d{3}-\d{4}(?=\s*(?:$|[^\d]))/g, validate: (match) => !/^\d{3}-\d{2}-\d{4}$/.test(match) },
+  { category: 'IBAN', pattern: /\b[A-Z]{2}\d{2}(?:[\s-]?[A-Z0-9]){11,30}\b/g, validate: ibanCheck },
+  { category: 'BANK_ACCOUNT', pattern: /(?:金融機関コード|銀行コード)[:：]?\s*\d{4}[、,\s]+(?:支店コード|支店番号)[:：]?\s*\d{3}[、,\s]+(?:口座番号)[:：]?\s*\d{7}\b/g },
+  { category: 'BANK_ACCOUNT', pattern: /(?:口座番号)[:：]?\s*(普通|当座)?\s*\d{7}\b/g },
+  { category: 'DRIVER_LICENSE', pattern: /(?:運転免許証番号|免許証番号|免許番号)[:：]?\s*(\d{12})\b/g, captureGroup: 1 },
+  { category: 'PASSPORT', pattern: /(?:旅券番号|パスポート番号|Passport(?: No\.)?)[:：]?\s*([A-Z]{2}\d{7})\b/gi, captureGroup: 1 },
+  { category: 'CRYPTO_WALLET', pattern: /\b(?:bc1[ac-hj-np-z02-9]{11,71}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}|0x[a-fA-F0-9]{40})\b/g },
+  { category: 'DATE_TIME', pattern: /(?:生年月日|誕生日|DOB|Date of Birth)[:：]?\s*((?:\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2})|(?:\d{1,2}[\/.-]\d{1,2}[\/.-]\d{4})|(?:(?:明治|大正|昭和|平成|令和)\d{1,2}年\d{1,2}月\d{1,2}日))/gi, captureGroup: 1 },
+  { category: 'MEDICAL_RECORD', pattern: /(?:診察券番号|患者番号|カルテ番号|医療記録番号)[:：]?\s*([A-Z0-9-]{6,20})\b/gi, captureGroup: 1 },
+  { category: 'HEALTH_INSURANCE', pattern: /(?:保険証番号|健康保険証番号)[:：]?\s*(?:記号\s*)?([A-Z0-9-]{2,12})[、,\s]+(?:番号\s*)?([A-Z0-9-]{2,12})/gi },
 ]
 
 function detectDictionary(text, categories, dictionary) {
@@ -282,6 +307,15 @@ const TEST_PII = {
   ssn: '123-45-6789',
   ipv4: '192.168.1.100',
   postalCode: '〒100-0001',
+  iban: 'GB82 WEST 1234 5698 7654 32',
+  bankAccount: '銀行コード0001 支店コード002 口座番号1234567',
+  driverLicense: '123456789012',
+  passport: 'AB1234567',
+  btcWallet: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT',
+  ethWallet: '0x52908400098527886E0F7030069857D2E4169EE7',
+  birthDate: '1990-04-15',
+  medicalRecord: 'MR-2024-0001',
+  healthInsurance: '記号 ABC123 番号 456789',
 }
 
 const TEST_MESSAGE = `私は${TEST_PII.dictName}です。${TEST_PII.dictOrg}に所属しています。` +
@@ -398,6 +432,83 @@ function testBugRegressions() {
     assert.ok(filtered.includes('[POSTAL_CODE_'), '#9: postal code should be masked')
     assert.ok(!filtered.includes('100-0001'), '#9: raw postal code should not remain')
     console.log('#9 POSTAL_CODE: OK')
+  }
+
+  {
+    const cases = [
+      {
+        issue: '#29',
+        category: 'IBAN',
+        input: `IBAN: ${TEST_PII.iban}`,
+        raw: TEST_PII.iban,
+      },
+      {
+        issue: '#30',
+        category: 'BANK_ACCOUNT',
+        input: TEST_PII.bankAccount,
+        raw: '1234567',
+      },
+      {
+        issue: '#31',
+        category: 'DRIVER_LICENSE',
+        input: `運転免許証番号: ${TEST_PII.driverLicense}`,
+        raw: TEST_PII.driverLicense,
+      },
+      {
+        issue: '#32',
+        category: 'PASSPORT',
+        input: `旅券番号: ${TEST_PII.passport}`,
+        raw: TEST_PII.passport,
+      },
+      {
+        issue: '#33',
+        category: 'CRYPTO_WALLET',
+        input: `BTC ${TEST_PII.btcWallet} ETH ${TEST_PII.ethWallet}`,
+        raw: TEST_PII.ethWallet,
+      },
+      {
+        issue: '#34',
+        category: 'DATE_TIME',
+        input: `生年月日: ${TEST_PII.birthDate}`,
+        raw: TEST_PII.birthDate,
+      },
+      {
+        issue: '#35',
+        category: 'MEDICAL_RECORD',
+        input: `カルテ番号: ${TEST_PII.medicalRecord}`,
+        raw: TEST_PII.medicalRecord,
+      },
+      {
+        issue: '#35',
+        category: 'HEALTH_INSURANCE',
+        input: `保険証番号: ${TEST_PII.healthInsurance}`,
+        raw: '456789',
+      },
+      {
+        issue: '#36',
+        category: 'MY_NUMBER',
+        input: '個人番号: 123456789012',
+        raw: '123456789012',
+      },
+    ]
+
+    for (const testCase of cases) {
+      const mapping = new MappingTable()
+      const filtered = filterText(
+        testCase.input,
+        { ...config, categories: [testCase.category] },
+        mapping,
+      )
+      assert.ok(
+        filtered.includes(`[${testCase.category}_`),
+        `${testCase.issue}: ${testCase.category} should be masked, got: ${filtered}`,
+      )
+      assert.ok(
+        !filtered.includes(testCase.raw),
+        `${testCase.issue}: raw ${testCase.category} should not remain, got: ${filtered}`,
+      )
+    }
+    console.log('#29-#36 Expanded PII regexes: OK')
   }
 
   {

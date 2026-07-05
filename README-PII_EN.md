@@ -48,7 +48,7 @@ ollama pull gemma3:4b
 ```json
 {
   "enabled": true,
-  "categories": ["EMAIL","PHONE","NAME","ORG","ADDRESS","API_KEY","CREDIT_CARD","MY_NUMBER","SCHOOL"],
+  "categories": ["EMAIL","PHONE","NAME","ORG","ADDRESS","API_KEY","CREDIT_CARD","MY_NUMBER","SCHOOL","IBAN","BANK_ACCOUNT","DRIVER_LICENSE","PASSPORT","CRYPTO_WALLET","DATE_TIME","MEDICAL_RECORD","HEALTH_INSURANCE"],
   "ollamaModel": "gemma3:4b",
   "ollamaEndpoint": "http://localhost:11434",
   "ollamaEnabled": true,

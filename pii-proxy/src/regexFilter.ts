@@ -41,6 +41,21 @@ function luhnCheck(digits: string): boolean {
   return sum % 10 === 0
 }
 
+function ibanCheck(input: string): boolean {
+  const iban = input.replace(/\s/g, '').toUpperCase()
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban)) return false
+
+  const rearranged = `${iban.slice(4)}${iban.slice(0, 4)}`
+  let remainder = 0
+  for (const char of rearranged) {
+    const value = /[A-Z]/.test(char) ? String(char.charCodeAt(0) - 55) : char
+    for (const digit of value) {
+      remainder = (remainder * 10 + Number.parseInt(digit, 10)) % 97
+    }
+  }
+  return remainder === 1
+}
+
 const PATTERNS: readonly PatternDef[] = [
   {
     category: 'API_KEY',
@@ -54,6 +69,11 @@ const PATTERNS: readonly PatternDef[] = [
     validate: luhnCheck,
   },
   { category: 'MY_NUMBER', pattern: /\b\d{4}[-\s]\d{4}[-\s]\d{4}\b/g },
+  {
+    category: 'MY_NUMBER',
+    pattern: /(?:マイナンバー|個人番号)[:：]?\s*(\d{12}|\d{4}[-\s]\d{4}[-\s]\d{4})\b/g,
+    captureGroup: 1,
+  },
   {
     category: 'PHONE',
     pattern: /(?:\+81[-\s]?|0)\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}\b/g,
@@ -99,6 +119,50 @@ const PATTERNS: readonly PatternDef[] = [
     category: 'POSTAL_CODE',
     pattern: /\b\d{3}-\d{4}(?=\s*(?:$|[^\d]))/g,
     validate: (match: string) => !/^\d{3}-\d{2}-\d{4}$/.test(match),
+  },
+  {
+    category: 'IBAN',
+    pattern: /\b[A-Z]{2}\d{2}(?:[\s-]?[A-Z0-9]){11,30}\b/g,
+    validate: ibanCheck,
+  },
+  {
+    category: 'BANK_ACCOUNT',
+    pattern:
+      /(?:金融機関コード|銀行コード)[:：]?\s*\d{4}[、,\s]+(?:支店コード|支店番号)[:：]?\s*\d{3}[、,\s]+(?:口座番号)[:：]?\s*\d{7}\b/g,
+  },
+  {
+    category: 'BANK_ACCOUNT',
+    pattern: /(?:口座番号)[:：]?\s*(普通|当座)?\s*\d{7}\b/g,
+  },
+  {
+    category: 'DRIVER_LICENSE',
+    pattern: /(?:運転免許証番号|免許証番号|免許番号)[:：]?\s*(\d{12})\b/g,
+    captureGroup: 1,
+  },
+  {
+    category: 'PASSPORT',
+    pattern: /(?:旅券番号|パスポート番号|Passport(?: No\.)?)[:：]?\s*([A-Z]{2}\d{7})\b/gi,
+    captureGroup: 1,
+  },
+  {
+    category: 'CRYPTO_WALLET',
+    pattern: /\b(?:bc1[ac-hj-np-z02-9]{11,71}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}|0x[a-fA-F0-9]{40})\b/g,
+  },
+  {
+    category: 'DATE_TIME',
+    pattern:
+      /(?:生年月日|誕生日|DOB|Date of Birth)[:：]?\s*((?:\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2})|(?:\d{1,2}[\/.-]\d{1,2}[\/.-]\d{4})|(?:(?:明治|大正|昭和|平成|令和)\d{1,2}年\d{1,2}月\d{1,2}日))/gi,
+    captureGroup: 1,
+  },
+  {
+    category: 'MEDICAL_RECORD',
+    pattern: /(?:診察券番号|患者番号|カルテ番号|医療記録番号)[:：]?\s*([A-Z0-9-]{6,20})\b/gi,
+    captureGroup: 1,
+  },
+  {
+    category: 'HEALTH_INSURANCE',
+    pattern:
+      /(?:保険証番号|健康保険証番号)[:：]?\s*(?:記号\s*)?([A-Z0-9-]{2,12})[、,\s]+(?:番号\s*)?([A-Z0-9-]{2,12})/gi,
   },
 ]
 
