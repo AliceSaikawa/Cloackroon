@@ -153,17 +153,69 @@ const PATTERNS = [
   { category: 'POSTAL_CODE', pattern: /\b\d{3}-\d{4}(?=\s*(?:$|[^\d]))/g, validate: (match) => !/^\d{3}-\d{2}-\d{4}$/.test(match) },
 ]
 
+function normalizeDictionaryChar(char, caseSensitive) {
+  const code = char.charCodeAt(0)
+  const halfWidth = code >= 0xff01 && code <= 0xff5e ? String.fromCharCode(code - 0xfee0) : char
+  return caseSensitive ? halfWidth : halfWidth.toLowerCase()
+}
+
+function buildDictionarySearchText(text, entry) {
+  const indexMap = []
+  let output = ''
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index] ?? ''
+    const normalized = entry.normalizeWidth
+      ? normalizeDictionaryChar(char, entry.caseSensitive === true)
+      : entry.caseSensitive === true
+        ? char
+        : char.toLowerCase()
+    output += normalized
+    indexMap.push(index)
+  }
+  return { text: output, indexMap }
+}
+
+function normalizeDictionaryNeedle(entry) {
+  if (entry.normalizeWidth) {
+    return [...entry.text].map((char) => normalizeDictionaryChar(char, entry.caseSensitive === true)).join('')
+  }
+  return entry.caseSensitive === true ? entry.text : entry.text.toLowerCase()
+}
+
+function isDictionaryBoundary(char) {
+  return !char || !/[\p{Letter}\p{Number}_]/u.test(char)
+}
+
+function hasExactDictionaryBoundary(text, start, end) {
+  return isDictionaryBoundary(text[start - 1]) && isDictionaryBoundary(text[end])
+}
+
 function detectDictionary(text, categories, dictionary) {
   const catSet = new Set(categories)
   const matches = []
   for (const entry of dictionary) {
     if (!catSet.has(entry.category)) continue
+    if (!entry.text) continue
+    const searchable = buildDictionarySearchText(text, entry)
+    const needle = normalizeDictionaryNeedle(entry)
+    if (!needle) continue
+
     let start = 0
     while (true) {
-      const idx = text.indexOf(entry.text, start)
+      const idx = searchable.text.indexOf(needle, start)
       if (idx === -1) break
-      matches.push({ text: entry.text, category: entry.category, start: idx, end: idx + entry.text.length })
-      start = idx + entry.text.length
+      const originalStart = searchable.indexMap[idx] ?? idx
+      const lastNeedleIndex = idx + needle.length - 1
+      const originalEnd = (searchable.indexMap[lastNeedleIndex] ?? lastNeedleIndex) + 1
+      if (entry.matchMode !== 'exact' || hasExactDictionaryBoundary(text, originalStart, originalEnd)) {
+        matches.push({
+          text: text.slice(originalStart, originalEnd),
+          category: entry.category,
+          start: originalStart,
+          end: originalEnd,
+        })
+      }
+      start = idx + Math.max(needle.length, 1)
     }
   }
   return matches.sort((a, b) => b.start - a.start)
@@ -374,6 +426,25 @@ function testBugRegressions() {
     assert.ok(filtered.includes(publicEmail), '#26: allowlisted email should remain visible')
     assert.ok(!filtered.includes(privateEmail), '#26: non-allowlisted email should still be masked')
     console.log('#26 Allowlist: OK')
+  }
+
+  {
+    const mapping = new MappingTable()
+    const filtered = filterText(
+      'Phoenix phoenix PHOENIX ＰＨＯＥＮＩＸ PhoenixProject',
+      {
+        ...config,
+        categories: ['ORG'],
+        dictionary: [
+          { text: 'phoenix', category: 'ORG', matchMode: 'exact', normalizeWidth: true },
+        ],
+      },
+      mapping,
+    )
+    const orgCount = (filtered.match(/\[ORG_\d+\]/g) ?? []).length
+    assert.equal(orgCount, 4, `#7: exact normalized dictionary should mask standalone variants only, got: ${filtered}`)
+    assert.ok(filtered.includes('PhoenixProject'), '#7: exact dictionary should not mask inside longer tokens')
+    console.log('#7 Dictionary match options: OK')
   }
 
   {

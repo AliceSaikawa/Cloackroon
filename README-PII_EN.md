@@ -52,6 +52,9 @@ ollama pull gemma3:4b
   "ollamaModel": "gemma3:4b",
   "ollamaEndpoint": "http://localhost:11434",
   "ollamaEnabled": true,
+  "dictionary": [
+    { "text": "Phoenix", "category": "ORG", "matchMode": "exact", "caseSensitive": false, "normalizeWidth": true }
+  ],
   "customPatterns": []
 }
 ```

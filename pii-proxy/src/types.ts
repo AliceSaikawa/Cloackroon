@@ -26,6 +26,9 @@ export type PIIMatch = {
 export type DictionaryEntry = {
   readonly text: string
   readonly category: PIICategory
+  readonly matchMode?: 'partial' | 'exact'
+  readonly caseSensitive?: boolean
+  readonly normalizeWidth?: boolean
 }
 
 export type PIIFilterConfig = {

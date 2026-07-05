@@ -7,6 +7,51 @@ type PatternDef = {
   readonly captureGroup?: number
 }
 
+function normalizeDictionaryChar(char: string, caseSensitive: boolean): string {
+  const code = char.charCodeAt(0)
+  const halfWidth =
+    code >= 0xff01 && code <= 0xff5e ? String.fromCharCode(code - 0xfee0) : char
+  return caseSensitive ? halfWidth : halfWidth.toLowerCase()
+}
+
+function buildDictionarySearchText(
+  text: string,
+  entry: DictionaryEntry,
+): { readonly text: string; readonly indexMap: readonly number[] } {
+  const indexMap: number[] = []
+  let output = ''
+
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index] ?? ''
+    const normalized = entry.normalizeWidth
+      ? normalizeDictionaryChar(char, entry.caseSensitive === true)
+      : entry.caseSensitive === true
+        ? char
+        : char.toLowerCase()
+    output += normalized
+    indexMap.push(index)
+  }
+
+  return { text: output, indexMap }
+}
+
+function normalizeDictionaryNeedle(entry: DictionaryEntry): string {
+  if (entry.normalizeWidth) {
+    return [...entry.text]
+      .map((char) => normalizeDictionaryChar(char, entry.caseSensitive === true))
+      .join('')
+  }
+  return entry.caseSensitive === true ? entry.text : entry.text.toLowerCase()
+}
+
+function isDictionaryBoundary(char: string | undefined): boolean {
+  return !char || !/[\p{Letter}\p{Number}_]/u.test(char)
+}
+
+function hasExactDictionaryBoundary(text: string, start: number, end: number): boolean {
+  return isDictionaryBoundary(text[start - 1]) && isDictionaryBoundary(text[end])
+}
+
 function selectNonOverlappingMatches(matches: readonly PIIMatch[]): readonly PIIMatch[] {
   const sorted = [...matches].sort(
     (left, right) => left.start - right.start || (right.end - right.start) - (left.end - left.start),
@@ -112,17 +157,33 @@ export function detectDictionaryPII(
 
   for (const entry of dictionary) {
     if (!categorySet.has(entry.category)) continue
+    if (!entry.text) continue
+
+    const searchable = buildDictionarySearchText(text, entry)
+    const needle = normalizeDictionaryNeedle(entry)
+    if (!needle) continue
+
     let start = 0
     while (true) {
-      const idx = text.indexOf(entry.text, start)
+      const idx = searchable.text.indexOf(needle, start)
       if (idx === -1) break
-      matches.push({
-        text: entry.text,
-        category: entry.category,
-        start: idx,
-        end: idx + entry.text.length,
-      })
-      start = idx + entry.text.length
+      const originalStart = searchable.indexMap[idx] ?? idx
+      const lastNeedleIndex = idx + needle.length - 1
+      const originalEnd = (searchable.indexMap[lastNeedleIndex] ?? lastNeedleIndex) + 1
+
+      if (
+        entry.matchMode !== 'exact' ||
+        hasExactDictionaryBoundary(text, originalStart, originalEnd)
+      ) {
+        matches.push({
+          text: text.slice(originalStart, originalEnd),
+          category: entry.category,
+          start: originalStart,
+          end: originalEnd,
+        })
+      }
+
+      start = idx + Math.max(needle.length, 1)
     }
   }
 
