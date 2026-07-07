@@ -9,7 +9,7 @@ export class MappingTable {
   private readonly placeholderToOriginal = new Map<string, string>()
   private readonly counters = new Map<PIICategory, number>()
 
-  register(original: string, category: PIICategory): string {
+  register(original: string, category: PIICategory, reversible = true): string {
     const existing = this.originalToPlaceholder.get(original)
     if (existing) return existing
 
@@ -18,7 +18,9 @@ export class MappingTable {
 
     const placeholder = `[${category}_${count}]`
     this.originalToPlaceholder.set(original, placeholder)
-    this.placeholderToOriginal.set(placeholder, original)
+    if (reversible) {
+      this.placeholderToOriginal.set(placeholder, original)
+    }
 
     return placeholder
   }

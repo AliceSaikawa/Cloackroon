@@ -121,6 +121,7 @@ export function detectDictionaryPII(
         category: entry.category,
         start: idx,
         end: idx + entry.text.length,
+        confidence: 0.9,
       })
       start = idx + entry.text.length
     }
@@ -156,6 +157,7 @@ export function detectRegexPII(
         category: def.category,
         start,
         end: start + matchText.length,
+        confidence: 1,
       })
     }
   }
@@ -170,6 +172,7 @@ export function detectRegexPII(
           category: 'NAME',
           start: m.index,
           end: m.index + m[0].length,
+          confidence: 1,
         })
       }
     } catch {
@@ -183,14 +186,14 @@ export function detectRegexPII(
 export function applyReplacements(
   text: string,
   matches: readonly PIIMatch[],
-  register: (original: string, category: PIICategory) => string,
+  register: (match: PIIMatch) => string,
 ): string {
   // Resolve overlaps before editing so one PII value never turns into nested placeholders.
   const winners = selectNonOverlappingMatches(matches)
   let result = text
 
   for (const match of winners) {
-    const placeholder = register(match.text, match.category)
+    const placeholder = register(match)
     result = result.slice(0, match.start) + placeholder + result.slice(match.end)
   }
 

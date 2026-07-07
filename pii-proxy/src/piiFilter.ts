@@ -1,11 +1,12 @@
 import { loadPIIConfig } from './config.js'
 import { getActiveCategories, isPassthroughEnabled } from './controlState.js'
+import { writeAuditLog } from './auditLog.js'
 import { MappingTable } from './mappingTable.js'
 import { detectOllamaPII } from './ollamaFilter.js'
 import { OpenAIStreamRestorer } from './openaiStreamRestorer.js'
 import { applyReplacements, detectDictionaryPII, detectRegexPII } from './regexFilter.js'
 import { StreamRestorer } from './streamRestorer.js'
-import type { PIICategory, PIIFilterConfig } from './types.js'
+import type { PIIFilterConfig, PIIMatch } from './types.js'
 
 export class PIIFilter {
   private readonly mappingTable = new MappingTable()
@@ -46,11 +47,13 @@ export class PIIFilter {
   }
 
   restoreText(text: string): string {
+    if (this.config.mode === 'anonymize') return text
     return this.mappingTable.replaceAllPlaceholders(text)
   }
 
   restoreResponseBody<T>(payload: T): T {
     if (!this.isEnabled()) return payload
+    if (this.config.mode === 'anonymize') return payload
     return this.restoreRecursive(payload) as T
   }
 
@@ -58,9 +61,25 @@ export class PIIFilter {
     this.mappingTable.clear()
   }
 
-  private registerMaskedValue(original: string, category: PIICategory): string {
-    if (this.allowlist.has(original)) return original
-    return this.mappingTable.register(original, category)
+  private registerMaskedMatch(match: PIIMatch): string {
+    if (this.allowlist.has(match.text)) return match.text
+
+    const isReversible = this.config.mode !== 'anonymize'
+    const placeholder = this.mappingTable.register(match.text, match.category, isReversible)
+    writeAuditLog(this.config.auditLog, {
+      timestamp: new Date().toISOString(),
+      category: match.category,
+      placeholder,
+      confidence: match.confidence,
+      position: {
+        start: match.start,
+        end: match.end,
+      },
+      mode: this.config.mode,
+      reviewRequired: match.confidence < this.config.auditLog.reviewThreshold,
+    })
+
+    return placeholder
   }
 
   private async filterMessages(messages: readonly unknown[]): Promise<unknown[]> {
@@ -149,10 +168,10 @@ export class PIIFilter {
       categories,
       this.config.dictionary,
     )
-    filtered = applyReplacements(filtered, dictionaryMatches, this.registerMaskedValue.bind(this))
+    filtered = applyReplacements(filtered, dictionaryMatches, this.registerMaskedMatch.bind(this))
 
     const regexMatches = detectRegexPII(filtered, categories, this.config.customPatterns)
-    filtered = applyReplacements(filtered, regexMatches, this.registerMaskedValue.bind(this))
+    filtered = applyReplacements(filtered, regexMatches, this.registerMaskedMatch.bind(this))
 
     if (this.config.ollamaEnabled && useOllama) {
       const ollamaMatches = await detectOllamaPII(
@@ -163,7 +182,7 @@ export class PIIFilter {
       )
 
       if (ollamaMatches.length > 0) {
-        filtered = applyReplacements(filtered, ollamaMatches, this.registerMaskedValue.bind(this))
+        filtered = applyReplacements(filtered, ollamaMatches, this.registerMaskedMatch.bind(this))
       }
     }
 

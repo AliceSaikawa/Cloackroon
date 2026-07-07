@@ -21,6 +21,7 @@ export type PIIMatch = {
   readonly category: PIICategory
   readonly start: number
   readonly end: number
+  readonly confidence: number
 }
 
 export type DictionaryEntry = {
@@ -28,8 +29,20 @@ export type DictionaryEntry = {
   readonly category: PIICategory
 }
 
+export type PIIMode = 'pseudonymize' | 'anonymize'
+
+export type AuditLogDestination = 'stderr' | 'file'
+
+export type AuditLogConfig = {
+  readonly enabled: boolean
+  readonly destination: AuditLogDestination
+  readonly path?: string
+  readonly reviewThreshold: number
+}
+
 export type PIIFilterConfig = {
   readonly enabled: boolean
+  readonly mode: PIIMode
   readonly categories: readonly PIICategory[]
   readonly ollamaEndpoint: string
   readonly ollamaModel: string
@@ -37,10 +50,12 @@ export type PIIFilterConfig = {
   readonly customPatterns: readonly { readonly name: string; readonly pattern: string }[]
   readonly dictionary: readonly DictionaryEntry[]
   readonly allowlist: readonly string[]
+  readonly auditLog: AuditLogConfig
 }
 
 export const DEFAULT_CONFIG: PIIFilterConfig = {
   enabled: true,
+  mode: 'pseudonymize',
   categories: [
     'EMAIL',
     'PHONE',
@@ -61,4 +76,9 @@ export const DEFAULT_CONFIG: PIIFilterConfig = {
   customPatterns: [],
   dictionary: [],
   allowlist: [],
+  auditLog: {
+    enabled: false,
+    destination: 'stderr',
+    reviewThreshold: 0.8,
+  },
 }

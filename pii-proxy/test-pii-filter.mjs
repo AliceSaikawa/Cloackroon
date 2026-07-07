@@ -48,6 +48,7 @@ async function loadActualModules() {
       const entries = [
         ['controlState.ts', 'controlState.mjs'],
         ['provider.ts', 'provider.mjs'],
+        ['piiFilter.ts', 'piiFilter.mjs'],
         ['streamRestorer.ts', 'streamRestorer.mjs'],
         ['openaiStreamRestorer.ts', 'openaiStreamRestorer.mjs'],
       ]
@@ -67,14 +68,15 @@ async function loadActualModules() {
           )
         }
 
-        const [controlState, provider, anthropicStream, openaiStream] = await Promise.all([
+        const [controlState, provider, piiFilter, anthropicStream, openaiStream] = await Promise.all([
           import(pathToFileURL(join(bundleDir, 'controlState.mjs')).href),
           import(pathToFileURL(join(bundleDir, 'provider.mjs')).href),
+          import(pathToFileURL(join(bundleDir, 'piiFilter.mjs')).href),
           import(pathToFileURL(join(bundleDir, 'streamRestorer.mjs')).href),
           import(pathToFileURL(join(bundleDir, 'openaiStreamRestorer.mjs')).href),
         ])
 
-        return { controlState, provider, anthropicStream, openaiStream, bundleDir }
+        return { controlState, provider, piiFilter, anthropicStream, openaiStream, bundleDir }
       } catch (error) {
         rmSync(bundleDir, { recursive: true, force: true })
         throw error
@@ -545,6 +547,89 @@ async function testControlState() {
   console.log('#13 Runtime control state: OK')
 }
 
+async function testPrivacyModesAndAuditLog() {
+  console.log('\n=== Privacy Modes and Audit Log ===')
+
+  const { piiFilter } = await loadActualModules()
+  const baseConfig = {
+    ...loadConfig(),
+    enabled: true,
+    categories: ['EMAIL', 'NAME'],
+    dictionary: TEST_DICTIONARY,
+    allowlist: [],
+    ollamaEnabled: false,
+    auditLog: {
+      enabled: false,
+      destination: 'stderr',
+      reviewThreshold: 0.95,
+    },
+  }
+
+  {
+    const filter = new piiFilter.PIIFilter({ ...baseConfig, mode: 'anonymize' })
+    const filtered = await filter.filterRequestBody({
+      messages: [
+        {
+          role: 'user',
+          content: `山田太郎のメールは${TEST_PII.email}です。再掲: ${TEST_PII.email}`,
+        },
+      ],
+    })
+
+    const content = filtered.messages[0].content
+    const emailPlaceholders = content.match(/\[EMAIL_\d+\]/g) ?? []
+    assert.equal(emailPlaceholders.length, 2, '#24: repeated email should be masked every time')
+    assert.equal(new Set(emailPlaceholders).size, 1, '#24: same PII value should keep one placeholder')
+    assert.ok(!content.includes(TEST_PII.email), '#22: anonymize mode should remove raw email')
+
+    const restored = filter.restoreResponseBody({ text: content })
+    assert.equal(restored.text, content, '#22: anonymize mode should not restore placeholders')
+    console.log('#22/#24 anonymize mode and placeholder context: OK')
+  }
+
+  {
+    const tmp = mkdtempSync(join(tmpdir(), 'pii-audit-test-'))
+    const auditPath = join(tmp, 'audit.jsonl')
+    try {
+      const filter = new piiFilter.PIIFilter({
+        ...baseConfig,
+        mode: 'pseudonymize',
+        auditLog: {
+          enabled: true,
+          destination: 'file',
+          path: auditPath,
+          reviewThreshold: 0.95,
+        },
+      })
+
+      await filter.filterRequestBody({
+        messages: [
+          {
+            role: 'user',
+            content: `山田太郎のメールは${TEST_PII.email}です。`,
+          },
+        ],
+      })
+
+      const lines = readFileSync(auditPath, 'utf8').trim().split('\n')
+      assert.ok(lines.length >= 2, '#21: audit log should record each masked value')
+
+      const entries = lines.map((line) => JSON.parse(line))
+      assert.ok(entries.some((entry) => entry.category === 'EMAIL'), '#21: audit log should include category')
+      assert.ok(entries.every((entry) => typeof entry.confidence === 'number'), '#21: confidence should be recorded')
+      assert.ok(entries.every((entry) => entry.position && typeof entry.position.start === 'number'), '#21: position should be recorded')
+      assert.ok(entries.some((entry) => entry.reviewRequired === true), '#21: low-confidence entries should be flagged')
+
+      const rawLog = lines.join('\n')
+      assert.ok(!rawLog.includes(TEST_PII.email), '#21: audit log must not contain raw email')
+      assert.ok(!rawLog.includes(TEST_PII.dictName), '#21: audit log must not contain raw dictionary name')
+      console.log('#21 confidence score and audit log: OK')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  }
+}
+
 // ============================================================
 // Scenario 2: Filter OFF
 // ============================================================
@@ -737,6 +822,7 @@ try {
   await testProviderRouting()
   await testStreamRestorers()
   await testControlState()
+  await testPrivacyModesAndAuditLog()
 
   if (runProxy) {
     await testActualProxy()
