@@ -1,9 +1,11 @@
-# Claude Code PII Filter Fork
+# Cloakroom
 
-**Language**: [日本語](README-PII.md) | **English**
+**Language**: [日本語](README.md) | **English**
 
-A fork of Claude Code CLI with PII (Personally Identifiable Information) filtering.
-Detects and masks personal information from all data sent to the Anthropic API, and restores placeholders when displaying responses.
+Checks your PII at the door, hands the API a ticket, and gives everything back on the way out.
+
+A local proxy that sits between the Claude Code CLI and the Anthropic API.
+Detects and masks personal information (PII) from all data sent to the Anthropic API, and restores placeholders when displaying responses.
 
 ## Architecture
 
@@ -20,17 +22,17 @@ User input / Tool results / System prompts
 
 ```bash
 # 1. Install dependencies and build
-npm --prefix pii-proxy install
-npm --prefix pii-proxy run build
+npm install
+npm run build
 
 # 2. Create the config file
-node pii-proxy/dist/cli.js init
+node dist/cli.js init
 
 # 3. Configure Claude Code to use the proxy
-node pii-proxy/dist/cli.js install --for=claude-code
+node dist/cli.js install --for=claude-code
 
 # 4. Start the proxy
-node pii-proxy/dist/cli.js start
+node dist/cli.js start
 ```
 
 To enable Ollama-backed person and organization detection:
@@ -61,7 +63,7 @@ Disable: `CLAUDE_PII_FILTER=0 node dist/cli.js`
 Runtime controls:
 
 ```bash
-node pii-proxy/dist/cli.js status
+node dist/cli.js status
 curl -X POST http://127.0.0.1:8787/control/passthrough
 curl -X POST http://127.0.0.1:8787/control/filter
 curl -X POST http://127.0.0.1:8787/control/disable/PHONE

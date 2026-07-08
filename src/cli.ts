@@ -16,14 +16,14 @@ type CommandContext = {
 }
 
 function printHelp(): void {
-  process.stdout.write(`pii-proxy
+  process.stdout.write(`cloakroom
 
 Usage:
-  pii-proxy start
-  pii-proxy init [--yes] [--force]
-  pii-proxy install --for=claude-code
-  pii-proxy status
-  pii-proxy test
+  cloakroom start
+  cloakroom init [--yes] [--force]
+  cloakroom install --for=claude-code
+  cloakroom status
+  cloakroom test
 
 Commands:
   start      Start the local PII proxy
