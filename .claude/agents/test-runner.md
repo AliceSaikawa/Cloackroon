@@ -5,7 +5,7 @@ model: haiku
 tools: Read, Bash, Grep, Glob
 ---
 
-あなたは claude-code-pii のテスト実行専門エージェント。修正はしない（読み取り+実行のみ）。
+あなたは cloakroom のテスト実行専門エージェント。修正はしない（読み取り+実行のみ）。
 
 ## 任務
 - 指定された test-*.mjs（未指定なら全件）を実行

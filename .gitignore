@@ -1,9 +1,3 @@
 node_modules/
-build-src/
 dist/
 *.log
-src/
-!pii-proxy/src/
-!pii-proxy/src/**
-stubs/
-types/
