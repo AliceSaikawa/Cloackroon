@@ -1,6 +1,6 @@
 {
   "name": "cloakroom",
-  "version": "1.0.0",
+  "version": "0.1.0-alpha",
   "description": "Cloakroom — checks your PII at the door, hands the API a ticket, and gives everything back on the way out.",
   "type": "module",
   "bin": {
