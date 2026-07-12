@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process'
 
 // Scenarios 1 & 2: inline filter logic (no server import to avoid port binding)
 // Scenario 3: HTTP requests to already-running proxy
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { request } from 'node:http'
@@ -617,7 +617,10 @@ async function testAdvancedSafetyRegressions() {
     assert.ok(!serialized.includes(TEST_PII.dictName), '#50: tool_use.input path should be masked')
     assert.ok(!serialized.includes(TEST_PII.email), '#50: tool_use.input email should be masked')
     assert.ok(!serialized.includes(TEST_PII.phone), '#50: tool_use.input nested strings should be masked')
-    assert.ok(serialized.includes('[NAME_') && serialized.includes('[EMAIL_') && serialized.includes('[PHONE_'))
+    assert.ok(
+      serialized.includes('[人名') && serialized.includes('[メールアドレス') && serialized.includes('[電話番号'),
+      '#50: tool_use.input should use readable placeholders',
+    )
     console.log('#50 tool_use.input filtering: OK')
   }
 
@@ -633,8 +636,8 @@ async function testAdvancedSafetyRegressions() {
     })
 
     const content = filtered.messages[0].content
-    assert.ok(content.includes('[EMPLOYEE_ID_1]'), '#51: customPatterns should use custom category names')
-    assert.ok(!content.includes('[NAME_'), '#51: customPatterns should not fall back to NAME')
+    assert.ok(content.includes('[EMPLOYEE_IDA]'), '#51: customPatterns should use custom category names')
+    assert.ok(!content.includes('[人名'), '#51: customPatterns should not fall back to NAME')
     console.log('#51 customPatterns category: OK')
   }
 
@@ -699,6 +702,50 @@ async function testAdvancedSafetyRegressions() {
       '#53: loopback Ollama endpoint should be accepted',
     )
     console.log('#53 Ollama endpoint validation: OK')
+  }
+
+  {
+    const tmp = mkdtempSync(join(tmpdir(), 'cloakroom-plugin-test-'))
+    const pluginPath = join(tmp, 'project-code.mjs')
+    writeFileSync(
+      pluginPath,
+      `export default {
+        name: 'PROJECT_CODE',
+        detect(text) {
+          return [...text.matchAll(/PRJ-\\d{4}/g)].map((match) => ({
+            start: match.index,
+            end: match.index + match[0].length,
+            value: match[0],
+          }))
+        },
+      }\n`,
+    )
+
+    try {
+      const filter = new piiFilter.PIIFilter({
+        ...baseConfig,
+        categories: [],
+        dictionary: [],
+        customPatterns: [],
+        plugins: [pluginPath],
+      })
+      const input = '案件 PRJ-2048 は社外秘です。'
+      const detections = await filter.analyzeText(input)
+      assert.equal(detections[0]?.category, 'PROJECT_CODE', '#37: plugin category should be reported')
+
+      const filtered = await filter.filterRequestBody({
+        messages: [{ role: 'user', content: input }],
+      })
+      assert.equal(
+        filtered.messages[0].content,
+        '案件 [PROJECT_CODEA] は社外秘です。',
+        '#37: plugin match should be replaced with a placeholder',
+      )
+      assert.equal(filter.restoreText('[PROJECT_CODEA]'), 'PRJ-2048', '#37: plugin placeholder should restore')
+      console.log('#37 local filter plugin: OK')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
   }
 }
 
@@ -772,7 +819,7 @@ async function testPrivacyControlFeatures() {
     })
 
     const content = filtered.messages[0].content
-    const placeholders = content.match(/\[EMAIL_\d+\]/g) ?? []
+    const placeholders = content.match(/\[メールアドレス[A-Z]+\]/g) ?? []
     assert.equal(placeholders.length, 2, '#24: repeated PII should be masked every time')
     assert.equal(new Set(placeholders).size, 1, '#24: same PII should reuse the same placeholder')
     assert.ok(!content.includes(TEST_PII.email), '#22: anonymize mode should remove raw PII')
@@ -791,6 +838,36 @@ async function testPrivacyControlFeatures() {
     assert.ok(input.includes(TEST_PII.email), '#23: analyze should not mutate the source text')
     console.log('#23 analyze dry run: OK')
   }
+}
+
+async function testJapanesePlaceholderLabels() {
+  console.log('\n=== Japanese Placeholder Labels ===')
+
+  const { piiFilter } = await loadActualModules()
+  const baseConfig = {
+    enabled: true,
+    mode: 'pseudonymize',
+    categories: ['EMAIL'],
+    ollamaEndpoint: 'http://localhost:11434',
+    allowRemoteOllama: false,
+    ollamaModel: 'gemma3:4b',
+    ollamaEnabled: false,
+    customPatterns: [],
+    customCategories: [],
+    dictionary: [],
+    allowlist: [],
+    auditLog: { enabled: false, destination: 'stderr', reviewThreshold: 0.8 },
+  }
+  const filter = new piiFilter.PIIFilter(baseConfig)
+  const emails = Array.from({ length: 28 }, (_, index) => `member${index}@example.com`).join(' ')
+  const filtered = await filter.filterRequestBody({ messages: [{ role: 'user', content: emails }] })
+  const content = filtered.messages[0].content
+
+  assert.ok(content.includes('[メールアドレスA]'), '#5: first placeholder should use a Japanese label')
+  assert.ok(content.includes('[メールアドレスZ]'), '#5: twenty-sixth placeholder should use Z')
+  assert.ok(content.includes('[メールアドレスAA]'), '#5: placeholder counter should continue with AA')
+  assert.equal(filter.restoreText(content), emails, '#5: Japanese placeholders should restore original text')
+  console.log('#5 Japanese placeholder labels: OK')
 }
 
 async function testFinancialIdentityRegexCoverage() {
@@ -1113,6 +1190,7 @@ try {
   await testControlState()
   await testAdvancedSafetyRegressions()
   await testPrivacyControlFeatures()
+  await testJapanesePlaceholderLabels()
   await testFinancialIdentityRegexCoverage()
   await testSensitiveRecordRegexCoverage()
 

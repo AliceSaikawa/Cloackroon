@@ -19,7 +19,7 @@ Claude Code / API client
 │  2. Regex match      (built-in + customPatterns)│
 │  3. Ollama LLM match  (NAME/ORG/SCHOOL, optional)│
 │       ↓                                         │
-│  Placeholder registration → [EMAIL_1] [NAME_2]  │
+│  Placeholder registration → [メールアドレスA] [人名B] │
 │  (per-session MappingTable)                     │
 └───────────────────────────────────────────────┘
         │ masked request
@@ -43,7 +43,7 @@ Claude Code / API client
 
 - Detection happens in three stages: **dictionary (exact match) → regex → Ollama LLM (optional)**. The Ollama LLM stage is disabled by default (`ollamaEnabled: false`); when enabled, it only handles the `NAME` / `ORG` / `SCHOOL` categories, and is skipped entirely if none of those are in the active category list.
 - Ollama detection is **not applied to the system prompt** (the `system` field is only filtered by dictionary and regex). Only user/assistant message content and tool results go through Ollama.
-- Placeholders use the format `[CATEGORY_N]` (e.g. `[EMAIL_1]`, `[NAME_2]`). The same original value always reuses the same placeholder. Values in `allowlist` are never masked.
+- Built-in placeholders use Japanese labels plus alphabetic counters (e.g. `[メールアドレスA]`, `[人名B]`). Counters continue from `A` through `Z`, then `AA`. The same original value always reuses the same placeholder. Values in `allowlist` are never masked.
 - The original-value ↔ placeholder mapping is kept **per session**. If a request carries `x-pii-session-id`, `anthropic-session-id`, or `x-session-id`, the mapping is tied to that ID (30-minute TTL); otherwise it lives only as long as the underlying TCP connection stays open. Sending `x-pii-session-reset: 1` discards that session's mapping.
 
 ## Setup
@@ -88,6 +88,21 @@ The proxy URL can be overridden with the `PII_PROXY_URL` environment variable (d
 
 To disable filtering entirely (pass everything through untouched): `CLAUDE_PII_FILTER=0 node dist/server.js`
 
+### Using it with Hermes Agent
+
+`cloakroom install --for=hermes-agent` writes `OPENAI_BASE_URL=http://127.0.0.1:8787/v1` to `~/.hermes/.env`. Configure a Chat Completions custom provider in Hermes Agent:
+
+```yaml
+# ~/.hermes/config.yaml
+providers:
+  cloakroom:
+    api: http://127.0.0.1:8787/v1
+    key_env: OPENAI_API_KEY
+model: cloakroom:your-model-name
+```
+
+Requests through this provider use `/v1/chat/completions`, which Cloakroom filters. The user continues to manage their Hermes provider settings and API key.
+
 ## Configuration reference
 
 Config file: `~/.claude/pii-filter.json` (created by `cloakroom init`, overwritten with `--force`). If it is missing or malformed, every field falls back to its default.
@@ -95,12 +110,13 @@ Config file: `~/.claude/pii-filter.json` (created by `cloakroom init`, overwritt
 | Field | Default | Description |
 |---|---|---|
 | `enabled` | `true` | Master on/off switch. When `false`, neither masking nor restoration runs |
-| `categories` | `["EMAIL","PHONE","ADDRESS","API_KEY","CREDIT_CARD","MY_NUMBER","NAME","ORG","SCHOOL","SSN","IP_ADDRESS","POSTAL_CODE"]` | Enabled PII categories. Of the 13 defined categories, `URL_USER` (Basic-auth-style userinfo in a URL) is not included by default and must be added explicitly |
+| `categories` | All 21 built-in categories except `URL_USER` | Enabled PII categories. `URL_USER` (Basic-auth-style userinfo in a URL) is not included by default and must be added explicitly |
 | `ollamaEndpoint` | `"http://localhost:11434"` | Ollama API endpoint. By default, only `localhost`, `127.*`, and `::1` are allowed |
 | `allowRemoteOllama` | `false` | Allows remote Ollama endpoints when set to `true`. Use only with trusted hosts because unmasked proper nouns may be sent there |
 | `ollamaModel` | `"gemma3:4b"` | Ollama model to use |
 | `ollamaEnabled` | `false` | Whether Ollama-backed `NAME`/`ORG`/`SCHOOL` detection runs (optional feature, disabled by default) |
 | `customPatterns` | `[]` | Extra regex patterns ({`name`, `pattern`, `category?`}). Uses `category` when provided, otherwise uses `name` as the category |
+| `plugins` | `[]` | Absolute paths to local JavaScript modules. Export a plugin with `detect(text)` as `default`, `plugin`, or in `plugins`. For TypeScript on Node 22, use `NODE_OPTIONS=--experimental-strip-types` or compile it to `.mjs` |
 | `dictionary` | `[]` | Known exact-match values ({`text`, `category`}). Evaluated before regex and Ollama |
 | `allowlist` | `[]` | Exact-match strings that are never masked, even if detected |
 
@@ -117,14 +133,15 @@ Environment variables:
 ```
 cloakroom start
 cloakroom init [--force]
-cloakroom install --for=claude-code
+cloakroom install --for=claude-code|hermes-agent
 cloakroom status
 cloakroom test
 ```
 
 - `start` — spawns `dist/server.js` as a child process
 - `init [--force]` — creates `~/.claude/pii-filter.json`. Does nothing if it already exists and `--force` is not passed
-- `install --for=claude-code` — writes the `~/.claude/.env` settings described above. Any other `--for` value throws an error
+- `install --for=claude-code` — writes the Claude Code connection settings to `~/.claude/.env`
+- `install --for=hermes-agent` — writes the Hermes Agent OpenAI-compatible connection setting to `~/.hermes/.env`
 - `status` — hits `/health` and `/control/status` and prints the combined result as JSON; exits with code 1 if the proxy is unreachable
 - `test` — runs a sample text through the filter with Ollama disabled, printing the result, as a quick sanity check
 
@@ -183,3 +200,4 @@ Requests to any other path are passed through untouched (defaulting to Anthropic
 - For clients that do not send an explicit session ID header, the mapping only lives as long as the TCP connection stays open; once it drops, previously issued placeholders can no longer be restored
 - Paths other than `/v1/messages` and `/v1/chat/completions` are proxied without any PII filtering
 - Masking PII inside source code can affect code-generation accuracy
+- Plugins execute local modules, so only configure trusted files in `plugins`. See [docs/multimodal-pii.md](docs/multimodal-pii.md) for the multimodal PII design

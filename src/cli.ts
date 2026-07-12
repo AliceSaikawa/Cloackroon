@@ -10,6 +10,7 @@ const DEFAULT_PROXY_URL = 'http://127.0.0.1:8787'
 const CLAUDE_DIR = join(homedir(), '.claude')
 const CONFIG_PATH = join(CLAUDE_DIR, 'pii-filter.json')
 const CLAUDE_ENV_PATH = join(CLAUDE_DIR, '.env')
+const HERMES_ENV_PATH = join(homedir(), '.hermes', '.env')
 
 type CommandContext = {
   readonly args: readonly string[]
@@ -21,14 +22,14 @@ function printHelp(): void {
 Usage:
   cloakroom start
   cloakroom init [--force]
-  cloakroom install --for=claude-code
+  cloakroom install --for=claude-code|hermes-agent
   cloakroom status
   cloakroom test
 
 Commands:
   start      Start the local PII proxy
   init       Create ~/.claude/pii-filter.json
-  install    Write Claude Code proxy environment settings
+  install    Write proxy environment settings for Claude Code or Hermes Agent
   status     Show proxy health and runtime filter status
   test       Run a local sample through the filter
 `)
@@ -80,20 +81,26 @@ function upsertEnvLine(contents: string, key: string, value: string): string {
   return `${trimmed}${trimmed ? '\n' : ''}${line}\n`
 }
 
-function installForClaudeCode(ctx: CommandContext): void {
+function installProxyEnvironment(ctx: CommandContext): void {
   const target = getOption(ctx.args, '--for')
-  if (target !== 'claude-code') {
-    throw new Error('install currently supports only --for=claude-code')
+  const proxyUrl = process.env['PII_PROXY_URL'] ?? DEFAULT_PROXY_URL
+
+  if (target === 'claude-code') {
+    ensureClaudeDir()
+    const existing = existsSync(CLAUDE_ENV_PATH) ? readFileSync(CLAUDE_ENV_PATH, 'utf8') : ''
+    let updated = upsertEnvLine(existing, 'ANTHROPIC_BASE_URL', proxyUrl)
+    updated = upsertEnvLine(updated, 'OPENAI_BASE_URL', `${proxyUrl}/v1`)
+    writeFileSync(CLAUDE_ENV_PATH, updated)
+    process.stdout.write(`Updated Claude Code env: ${CLAUDE_ENV_PATH}\n`)
+  } else if (target === 'hermes-agent') {
+    mkdirSync(dirname(HERMES_ENV_PATH), { recursive: true })
+    const existing = existsSync(HERMES_ENV_PATH) ? readFileSync(HERMES_ENV_PATH, 'utf8') : ''
+    writeFileSync(HERMES_ENV_PATH, upsertEnvLine(existing, 'OPENAI_BASE_URL', `${proxyUrl}/v1`))
+    process.stdout.write(`Updated Hermes Agent env: ${HERMES_ENV_PATH}\n`)
+  } else {
+    throw new Error('install supports --for=claude-code or --for=hermes-agent')
   }
 
-  ensureClaudeDir()
-  const proxyUrl = process.env['PII_PROXY_URL'] ?? DEFAULT_PROXY_URL
-  const existing = existsSync(CLAUDE_ENV_PATH) ? readFileSync(CLAUDE_ENV_PATH, 'utf8') : ''
-  let updated = upsertEnvLine(existing, 'ANTHROPIC_BASE_URL', proxyUrl)
-  updated = upsertEnvLine(updated, 'OPENAI_BASE_URL', `${proxyUrl}/v1`)
-  writeFileSync(CLAUDE_ENV_PATH, updated)
-
-  process.stdout.write(`Updated Claude Code env: ${CLAUDE_ENV_PATH}\n`)
   process.stdout.write(`Proxy URL: ${proxyUrl}\n`)
 }
 
@@ -177,7 +184,7 @@ async function main(): Promise<void> {
   }
 
   if (command === 'install') {
-    installForClaudeCode(ctx)
+    installProxyEnvironment(ctx)
     return
   }
 

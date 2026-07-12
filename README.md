@@ -19,7 +19,7 @@ Claude Code / APIクライアント
 │  2. 正規表現        (組み込みパターン + customPatterns) │
 │  3. Ollama LLM      (NAME/ORG/SCHOOL、オプション)│
 │       ↓                                         │
-│  プレースホルダ登録 → [EMAIL_1] [NAME_2] 等       │
+│  プレースホルダ登録 → [メールアドレスA] [人名B] 等  │
 │  (セッション単位の MappingTable)                  │
 └───────────────────────────────────────────────┘
         │ マスク済みリクエスト
@@ -43,7 +43,7 @@ Claude Code / APIクライアント
 
 - 検出は3段階: **辞書(完全一致) → 正規表現 → Ollama LLM(オプション)**。Ollama LLM段はデフォルトで無効(`ollamaEnabled: false`)で、有効化しても `NAME` / `ORG` / `SCHOOL` の3カテゴリのみを担当し、有効カテゴリにこれらが含まれない場合は呼び出されない。
 - Ollamaによる検出は **システムプロンプトには適用されない**(system フィールドは辞書・正規表現のみでフィルタされる)。ユーザー/アシスタントのメッセージ本文とツール結果のみが対象。
-- プレースホルダは `[カテゴリ_連番]` 形式(例: `[EMAIL_1]`, `[NAME_2]`)。同じ元値は同じプレースホルダに再利用される。`allowlist` に含まれる値はマスクされない。
+- プレースホルダは日本語ラベル+アルファベット連番形式(例: `[メールアドレスA]`, `[人名B]`)。連番は `A` から `Z`、続いて `AA` の順で進む。同じ元値は同じプレースホルダに再利用される。`allowlist` に含まれる値はマスクされない。
 - マッピング(元値⇄プレースホルダ)は**セッション単位**で保持される。`x-pii-session-id` / `anthropic-session-id` / `x-session-id` のいずれかのヘッダがあればそのIDに紐付き(30分TTL)、無ければ同じ接続(TCPソケット)が生きている間だけ保持される。`x-pii-session-reset: 1` でそのセッションのマッピングを破棄できる。
 
 ## セットアップ
@@ -88,6 +88,21 @@ OPENAI_BASE_URL=http://127.0.0.1:8787/v1
 
 無効化(フィルタを素通しにする): `CLAUDE_PII_FILTER=0 node dist/server.js`
 
+### Hermes Agent から使う
+
+`cloakroom install --for=hermes-agent` は `~/.hermes/.env` に `OPENAI_BASE_URL=http://127.0.0.1:8787/v1` を書き込む。Hermes Agent側では、Chat Completions形式を使うカスタムプロバイダを設定する:
+
+```yaml
+# ~/.hermes/config.yaml
+providers:
+  cloakroom:
+    api: http://127.0.0.1:8787/v1
+    key_env: OPENAI_API_KEY
+model: cloakroom:利用するモデル名
+```
+
+この経路では `/v1/chat/completions` がフィルタ対象になる。Hermes Agentのモデルプロバイダ設定とAPIキーは従来どおり利用者が管理する。
+
 ## 設定リファレンス
 
 設定ファイル: `~/.claude/pii-filter.json`(`cloakroom init` で生成、`--force` で上書き)。存在しない/壊れている場合は全項目デフォルト値で動作する。
@@ -95,12 +110,13 @@ OPENAI_BASE_URL=http://127.0.0.1:8787/v1
 | 項目 | デフォルト | 説明 |
 |---|---|---|
 | `enabled` | `true` | フィルタ全体の有効/無効。`false` ならマスク・復元とも行わない |
-| `categories` | `["EMAIL","PHONE","ADDRESS","API_KEY","CREDIT_CARD","MY_NUMBER","NAME","ORG","SCHOOL","SSN","IP_ADDRESS","POSTAL_CODE"]` | 有効化するPIIカテゴリ。定義済み全13種のうち `URL_USER`(URL内Basic認証情報)は既定では含まれず、使うには明示的に追加する必要がある |
+| `categories` | 組み込み全21カテゴリ (`URL_USER` を除く) | 有効化するPIIカテゴリ。`URL_USER`(URL内Basic認証情報)だけは既定では含まれず、使うには明示的に追加する必要がある |
 | `ollamaEndpoint` | `"http://localhost:11434"` | Ollama APIのエンドポイント。既定では `localhost` / `127.*` / `::1` のみ許可される |
 | `allowRemoteOllama` | `false` | `true` にするとリモートOllamaエンドポイントを許可する。未マスクの固有名詞が送信され得るため、信頼できるホストに限定する |
 | `ollamaModel` | `"gemma3:4b"` | 使用するOllamaモデル |
 | `ollamaEnabled` | `false` | Ollamaによる `NAME`/`ORG`/`SCHOOL` 検出を使うか(デフォルト無効のオプション機能) |
 | `customPatterns` | `[]` | 追加の正規表現({`name`, `pattern`, `category?`})。`category` があればそのカテゴリ、なければ `name` をカテゴリ名として使う |
+| `plugins` | `[]` | ローカルJavaScriptモジュールの絶対パス。`default`、`plugin`、`plugins` のいずれかで `detect(text)` を持つプラグインをexportする。TypeScriptはNode 22で `NODE_OPTIONS=--experimental-strip-types` を付けるか、`.mjs`へコンパイルして使う |
 | `dictionary` | `[]` | 完全一致で検出する既知の値({`text`, `category`})。正規表現・Ollamaより先に評価される |
 | `allowlist` | `[]` | ここに含まれる文字列(完全一致)は検出されてもマスクされない |
 
@@ -117,14 +133,15 @@ OPENAI_BASE_URL=http://127.0.0.1:8787/v1
 ```
 cloakroom start
 cloakroom init [--force]
-cloakroom install --for=claude-code
+cloakroom install --for=claude-code|hermes-agent
 cloakroom status
 cloakroom test
 ```
 
 - `start` — `dist/server.js` を子プロセスとして起動する
 - `init [--force]` — `~/.claude/pii-filter.json` を作成。既に存在し `--force` が無ければ何もしない
-- `install --for=claude-code` — 上記の `~/.claude/.env` 書き込みを行う。`--for=claude-code` 以外の値はエラーになる
+- `install --for=claude-code` — `~/.claude/.env` にClaude Code向け接続先を書き込む
+- `install --for=hermes-agent` — `~/.hermes/.env` にHermes Agent向けOpenAI互換接続先を書き込む
 - `status` — `/health` と `/control/status` を叩いて結果をJSONで表示。プロキシに到達できなければエラー終了(終了コード1)
 - `test` — Ollamaを使わない設定でサンプルテキストをフィルタし、結果を表示する動作確認コマンド
 
@@ -183,3 +200,4 @@ curl -X POST http://127.0.0.1:8787/control/disable/PHONE
 - 明示的なセッションIDヘッダを送らないクライアントでは、マッピングはTCP接続が維持されている間のみ有効。接続が切れると、以前発行したプレースホルダは復元できなくなる
 - `/v1/messages` と `/v1/chat/completions` 以外のパスはPIIフィルタなしで透過プロキシされる
 - ソースファイル内のPIIがマスクされることで、コード生成の精度に影響が出る場合がある
+- プラグインはローカルモジュールを実行するため、信頼できるファイルだけを `plugins` に設定する。マルチモーダル対応の設計は [docs/multimodal-pii.md](docs/multimodal-pii.md) を参照

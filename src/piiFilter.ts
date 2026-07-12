@@ -4,6 +4,7 @@ import { writeAuditLog } from './auditLog.js'
 import { MappingTable } from './mappingTable.js'
 import { detectOllamaPII } from './ollamaFilter.js'
 import { OpenAIStreamRestorer } from './openaiStreamRestorer.js'
+import { detectPluginPII, loadFilterPlugins } from './pluginLoader.js'
 import {
   applyReplacements,
   detectDictionaryPII,
@@ -11,7 +12,14 @@ import {
   selectNonOverlappingMatches,
 } from './regexFilter.js'
 import { StreamRestorer } from './streamRestorer.js'
-import type { CustomPatternEntry, DictionaryEntry, PIICategory, PIIFilterConfig, PIIMatch } from './types.js'
+import {
+  CATEGORY_LABELS,
+  type CustomPatternEntry,
+  type DictionaryEntry,
+  type PIICategory,
+  type PIIFilterConfig,
+  type PIIMatch,
+} from './types.js'
 
 function getCustomCategoryNames(config: PIIFilterConfig): readonly PIICategory[] {
   return config.customCategories
@@ -98,12 +106,18 @@ export class PIIFilter {
     if (!text.trim()) return []
 
     const categories = getActiveCategories(getConfiguredCategories(this.config))
-    if (categories.length === 0) return []
+    const plugins = await loadFilterPlugins(this.config.plugins)
+    if (categories.length === 0 && plugins.length === 0) return []
 
-    const matches: PIIMatch[] = [
-      ...detectDictionaryPII(text, categories, [...this.config.dictionary, ...getCustomDictionary(this.config)]),
-      ...detectRegexPII(text, categories, getCustomPatterns(this.config)),
-    ]
+    const matches: PIIMatch[] = []
+    if (categories.length > 0) {
+      matches.push(
+        ...detectDictionaryPII(text, categories, [...this.config.dictionary, ...getCustomDictionary(this.config)]),
+        ...detectRegexPII(text, categories, getCustomPatterns(this.config)),
+      )
+    }
+
+    matches.push(...(await detectPluginPII(text, plugins)))
 
     if (options.useOllama && this.config.ollamaEnabled) {
       matches.push(
@@ -133,7 +147,10 @@ export class PIIFilter {
     const placeholder = this.mappingTable.register(
       match.text,
       match.category,
-      customCategory?.placeholder ?? customCategory?.label ?? String(match.category),
+      customCategory?.placeholder ??
+        customCategory?.label ??
+        CATEGORY_LABELS[match.category as keyof typeof CATEGORY_LABELS] ??
+        String(match.category),
       isReversible,
     )
 
@@ -256,17 +273,23 @@ export class PIIFilter {
 
     let filtered = text
     const categories = getActiveCategories(getConfiguredCategories(this.config))
-    if (categories.length === 0) return filtered
+    const plugins = await loadFilterPlugins(this.config.plugins)
+    if (categories.length === 0 && plugins.length === 0) return filtered
 
-    const dictionaryMatches = detectDictionaryPII(
-      filtered,
-      categories,
-      [...this.config.dictionary, ...getCustomDictionary(this.config)],
-    )
-    filtered = applyReplacements(filtered, dictionaryMatches, this.registerMaskedMatch.bind(this))
+    if (categories.length > 0) {
+      const dictionaryMatches = detectDictionaryPII(
+        filtered,
+        categories,
+        [...this.config.dictionary, ...getCustomDictionary(this.config)],
+      )
+      filtered = applyReplacements(filtered, dictionaryMatches, this.registerMaskedMatch.bind(this))
 
-    const regexMatches = detectRegexPII(filtered, categories, getCustomPatterns(this.config))
-    filtered = applyReplacements(filtered, regexMatches, this.registerMaskedMatch.bind(this))
+      const regexMatches = detectRegexPII(filtered, categories, getCustomPatterns(this.config))
+      filtered = applyReplacements(filtered, regexMatches, this.registerMaskedMatch.bind(this))
+    }
+
+    const pluginMatches = await detectPluginPII(filtered, plugins)
+    filtered = applyReplacements(filtered, pluginMatches, this.registerMaskedMatch.bind(this))
 
     if (this.config.ollamaEnabled && useOllama) {
       const ollamaMatches = await detectOllamaPII(
