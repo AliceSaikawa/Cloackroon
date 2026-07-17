@@ -4,6 +4,20 @@ function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+function toAlphabeticSequence(count: number): string {
+  let value = count
+  let result = ''
+
+  // Spreadsheet-style numbering: 1 = A, 26 = Z, 27 = AA.
+  while (value > 0) {
+    value -= 1
+    result = String.fromCharCode(65 + (value % 26)) + result
+    value = Math.floor(value / 26)
+  }
+
+  return result
+}
+
 export class MappingTable {
   private readonly originalToPlaceholder = new Map<string, string>()
   private readonly placeholderToOriginal = new Map<string, string>()
@@ -22,7 +36,7 @@ export class MappingTable {
     const count = (this.counters.get(counterKey) ?? 0) + 1
     this.counters.set(counterKey, count)
 
-    const placeholder = `[${placeholderPrefix}_${count}]`
+    const placeholder = `[${placeholderPrefix}${toAlphabeticSequence(count)}]`
     this.originalToPlaceholder.set(original, placeholder)
     if (reversible) {
       this.placeholderToOriginal.set(placeholder, original)

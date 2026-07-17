@@ -56,6 +56,9 @@ export function loadPIIConfig(): PIIFilterConfig {
       ollamaEnabled: parsed.ollamaEnabled ?? DEFAULT_CONFIG.ollamaEnabled,
       customPatterns: parsed.customPatterns ?? DEFAULT_CONFIG.customPatterns,
       customCategories: parsed.customCategories ?? DEFAULT_CONFIG.customCategories,
+      plugins: Array.isArray(parsed.plugins)
+        ? parsed.plugins.filter((plugin: unknown): plugin is string => typeof plugin === 'string')
+        : DEFAULT_CONFIG.plugins,
       dictionary: parsed.dictionary ?? DEFAULT_CONFIG.dictionary,
       allowlist: parsed.allowlist ?? DEFAULT_CONFIG.allowlist,
       auditLog: {
